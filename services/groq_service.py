@@ -14,21 +14,21 @@ def ask_ai(prompt):
 
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type":  "application/json"
     }
     payload = {
-        "model": "llama-3.1-8b-instant",
+        "model":    "llama-3.1-8b-instant",
         "messages": [{"role": "user", "content": prompt}]
     }
 
     response = requests.post(URL, headers=headers, json=payload, timeout=30)
 
     if response.status_code == 401:
-        raise ValueError("Invalid GROQ_API_KEY — check Render environment variables")
+        raise ValueError("Invalid GROQ_API_KEY")
     if response.status_code != 200:
         raise ValueError(f"Groq API error {response.status_code}: {response.text[:200]}")
 
-    data = response.json()
+    data    = response.json()
     choices = data.get("choices")
     if not choices:
         raise ValueError(f"Groq returned no choices: {data}")
