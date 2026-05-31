@@ -5,19 +5,40 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-HF_TOKEN     = os.getenv("HF_TOKEN", "")  # optional but increases rate limit
+SUPABASE_URL      = os.getenv("SUPABASE_URL")
+SUPABASE_KEY      = os.getenv("SUPABASE_KEY")
+HF_TOKEN          = os.getenv("HF_TOKEN", "")
 
-# Hugging Face Inference API — no model loaded locally, zero RAM cost
-HF_API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+# Local embedding service URL (voice-tutor container)
+# Set LOCAL_EMBED_URL in Render env vars if you want to use your local container
+# via ngrok tunnel. Falls back to HuggingFace API if not set.
+LOCAL_EMBED_URL   = os.getenv("LOCAL_EMBED_URL", "")
+HF_API_URL        = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
 
 
 def embed(text: str) -> list:
     """
-    Generate 384-dim embedding via HuggingFace Inference API.
-    No model loaded locally — solves Render 512MB RAM limit.
+    Generate embedding.
+    Priority:
+    1. Local container via LOCAL_EMBED_URL (set via ngrok tunnel)
+    2. HuggingFace Inference API (fallback)
     """
+
+    # Try local container first (fastest, free, no limits)
+    if LOCAL_EMBED_URL:
+        try:
+            res = requests.post(
+                f"{LOCAL_EMBED_URL}/embed",
+                json={"text": text},
+                timeout=15
+            )
+            if res.status_code == 200:
+                return res.json()["embedding"]
+            print(f"[rag] Local embed failed {res.status_code} — falling back to HF")
+        except Exception as e:
+            print(f"[rag] Local embed unreachable: {e} — falling back to HF")
+
+    # Fallback: HuggingFace Inference API
     headers = {"Content-Type": "application/json"}
     if HF_TOKEN:
         headers["Authorization"] = f"Bearer {HF_TOKEN}"
@@ -33,16 +54,13 @@ def embed(text: str) -> list:
         raise ValueError(f"HF embedding API error {res.status_code}: {res.text[:200]}")
 
     data = res.json()
-
-    # HF returns [[...vector...]] — unwrap
     if isinstance(data, list) and isinstance(data[0], list):
         return data[0]
 
-    raise ValueError(f"Unexpected HF response format: {str(data)[:100]}")
+    raise ValueError(f"Unexpected HF response: {str(data)[:100]}")
 
 
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list:
-    """Split text into overlapping word-based chunks."""
     words  = text.split()
     chunks = []
     start  = 0
@@ -58,7 +76,6 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list:
 
 
 def ingest_text(text: str, topic: str, source: str) -> dict:
-    """Chunk, embed, store in Supabase pgvector."""
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise ValueError("SUPABASE_URL or SUPABASE_KEY not set")
 
@@ -80,19 +97,13 @@ def ingest_text(text: str, topic: str, source: str) -> dict:
         try:
             vector = embed(chunk)
         except Exception as e:
-            print(f"[rag] Embedding failed for chunk: {e}")
+            print(f"[rag] Embedding failed: {e}")
             continue
 
-        payload = {
-            "topic":     topic,
-            "content":   chunk,
-            "embedding": vector,
-            "source":    source
-        }
         res = requests.post(
             f"{SUPABASE_URL}/rest/v1/documents",
             headers=headers,
-            json=payload,
+            json={"topic": topic, "content": chunk, "embedding": vector, "source": source},
             timeout=15
         )
         if res.status_code in (200, 201):
@@ -104,7 +115,6 @@ def ingest_text(text: str, topic: str, source: str) -> dict:
 
 
 def search_chunks(query: str, topic: str = None, top_k: int = 5, threshold: float = 0.3) -> list:
-    """Search pgvector for chunks most relevant to query."""
     if not SUPABASE_URL or not SUPABASE_KEY:
         return []
 
@@ -123,22 +133,16 @@ def search_chunks(query: str, topic: str = None, top_k: int = 5, threshold: floa
     res = requests.post(
         f"{SUPABASE_URL}/rest/v1/rpc/match_documents",
         headers=headers,
-        json={
-            "query_embedding": query_vector,
-            "match_threshold": threshold,
-            "match_count":     top_k
-        },
+        json={"query_embedding": query_vector, "match_threshold": threshold, "match_count": top_k},
         timeout=15
     )
 
     if res.status_code != 200:
-        print(f"[rag] Search failed: {res.status_code} {res.text[:200]}")
+        print(f"[rag] Search failed: {res.status_code}")
         return []
 
     results = res.json()
-
     if topic:
-        topic_lower = topic.lower()
-        results = [r for r in results if topic_lower in (r.get("topic", "")).lower()]
+        results = [r for r in results if topic.lower() in r.get("topic", "").lower()]
 
     return [r["content"] for r in results]
