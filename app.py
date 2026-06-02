@@ -15,6 +15,7 @@ CORS(app, origins=[
     "http://localhost",
     "http://127.0.0.1",
     "http://localhost:5500",
+    "http://localhost:9000"
     "null"
 ])
 
