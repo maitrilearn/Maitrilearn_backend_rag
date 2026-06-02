@@ -14,17 +14,23 @@ def whiteboard_lesson():
 
     topic = data["topic"]
 
-    # ── RAG: fetch relevant chunks from knowledge base ────────────────────────
-    rag_context = ""
-    try:
-        chunks = search_chunks(topic, topic=topic, top_k=5, threshold=0.25)
-        if chunks:
-            rag_context = "\n\n".join(chunks)
-            print(f"[whiteboard] RAG found {len(chunks)} chunks for '{topic}'")
-        else:
-            print(f"[whiteboard] No RAG chunks found for '{topic}' — using AI knowledge")
-    except Exception as e:
-        print(f"[whiteboard] RAG search error: {e} — continuing without RAG")
+   # ── RAG: fetch relevant chunks from knowledge base ────────────────────────
+rag_context = ""
+chunks = []
+
+try:
+    chunks = search_chunks(topic, top_k=5, threshold=0.25)
+
+    print(f"[whiteboard] Retrieved {len(chunks)} chunks")
+
+    if chunks:
+        rag_context = "\n\n".join(chunks)
+        print(f"[whiteboard] RAG found {len(chunks)} chunks for '{topic}'")
+    else:
+        print(f"[whiteboard] No RAG chunks found for '{topic}' — using AI knowledge")
+
+except Exception as e:
+    print(f"[whiteboard] RAG search error: {e} — continuing without RAG")
 
     # ── Build prompt — inject RAG context if available ────────────────────────
     if rag_context:
@@ -145,4 +151,4 @@ Topic: {topic}
         return {"error": "AI returned invalid format. Try again."}, 500
     except Exception as e:
         print(f"[whiteboard] Error: {e}")
-        return {"error": "AI service unavailable. Try again."}, 503
+        return {"error": "AI service unavailable. ry again."}, 503
