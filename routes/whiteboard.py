@@ -14,23 +14,23 @@ def whiteboard_lesson():
 
     topic = data["topic"]
 
-   # ── RAG: fetch relevant chunks from knowledge base ────────────────────────
-rag_context = ""
-chunks = []
+    # ── RAG: fetch relevant chunks from knowledge base ────────────────────────
+    rag_context = ""
+    chunks = []
 
-try:
-    chunks = search_chunks(topic, top_k=5, threshold=0.25)
+    try:
+        chunks = search_chunks(topic, top_k=5, threshold=0.25)
 
-    print(f"[whiteboard] Retrieved {len(chunks)} chunks")
+        print(f"[whiteboard] Retrieved {len(chunks)} chunks")
 
-    if chunks:
-        rag_context = "\n\n".join(chunks)
-        print(f"[whiteboard] RAG found {len(chunks)} chunks for '{topic}'")
-    else:
-        print(f"[whiteboard] No RAG chunks found for '{topic}' — using AI knowledge")
+        if chunks:
+            rag_context = "\n\n".join(chunks)
+            print(f"[whiteboard] RAG found {len(chunks)} chunks for '{topic}'")
+        else:
+            print(f"[whiteboard] No RAG chunks found for '{topic}' — using AI knowledge")
 
-except Exception as e:
-    print(f"[whiteboard] RAG search error: {e} — continuing without RAG")
+    except Exception as e:
+        print(f"[whiteboard] RAG search error: {e} — continuing without RAG")
 
     # ── Build prompt — inject RAG context if available ────────────────────────
     if rag_context:
