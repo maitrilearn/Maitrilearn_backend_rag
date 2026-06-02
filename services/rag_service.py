@@ -7,24 +7,18 @@ load_dotenv()
 
 SUPABASE_URL      = os.getenv("SUPABASE_URL")
 SUPABASE_KEY      = os.getenv("SUPABASE_KEY")
-HF_TOKEN          = os.getenv("HF_TOKEN", "")
-
-# Local embedding service URL (voice-tutor container)
-# Set LOCAL_EMBED_URL in Render env vars if you want to use your local container
-# via ngrok tunnel. Falls back to HuggingFace API if not set.
+JINA_API_KEY      = os.getenv("JINA_API_KEY", "")
 LOCAL_EMBED_URL   = os.getenv("LOCAL_EMBED_URL", "")
-HF_API_URL        = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
-
 
 def embed(text: str) -> list:
     """
     Generate embedding.
     Priority:
-    1. Local container via LOCAL_EMBED_URL (set via ngrok tunnel)
-    2. HuggingFace Inference API (fallback)
+    1. Local embedding service
+    2. Jina AI
     """
 
-    # Try local container first (fastest, free, no limits)
+    # Local embedding service (optional)
     if LOCAL_EMBED_URL:
         try:
             res = requests.post(
@@ -32,33 +26,42 @@ def embed(text: str) -> list:
                 json={"text": text},
                 timeout=15
             )
+
             if res.status_code == 200:
                 return res.json()["embedding"]
-            print(f"[rag] Local embed failed {res.status_code} — falling back to HF")
-        except Exception as e:
-            print(f"[rag] Local embed unreachable: {e} — falling back to HF")
 
-    # Fallback: HuggingFace Inference API
-    headers = {"Content-Type": "application/json"}
-    if HF_TOKEN:
-        headers["Authorization"] = f"Bearer {HF_TOKEN}"
+            print(f"[rag] Local embed failed: {res.status_code}")
+
+        except Exception as e:
+            print(f"[rag] Local embed unreachable: {e}")
+
+    # Jina AI fallback
+    if not JINA_API_KEY:
+        raise ValueError("JINA_API_KEY not configured")
+
+    headers = {
+        "Authorization": f"Bearer {JINA_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
     res = requests.post(
-        HF_API_URL,
+        "https://api.jina.ai/v1/embeddings",
         headers=headers,
-        json={"inputs": text, "options": {"wait_for_model": True}},
+        json={
+            "model": "jina-embeddings-v3",
+            "input": [text]
+        },
         timeout=30
     )
 
     if res.status_code != 200:
-        raise ValueError(f"HF embedding API error {res.status_code}: {res.text[:200]}")
+        raise ValueError(
+            f"Jina API error {res.status_code}: {res.text[:200]}"
+        )
 
     data = res.json()
-    if isinstance(data, list) and isinstance(data[0], list):
-        return data[0]
 
-    raise ValueError(f"Unexpected HF response: {str(data)[:100]}")
-
+    return data["data"][0]["embedding"]
 
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list:
     words  = text.split()
