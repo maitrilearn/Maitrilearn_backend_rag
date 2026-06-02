@@ -17,11 +17,20 @@ def ask_ai(prompt):
         "Content-Type":  "application/json"
     }
     payload = {
-        "model":    "llama-3.1-8b-instant",
-        "messages": [{"role": "user", "content": prompt}]
-    }
+    "model": "llama-3.1-8b-instant",
+    "messages": [
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ],
+    "response_format": {
+        "type": "json_object"
+    },
+    "temperature": 0.2
+}
 
-    response = requests.post(URL, headers=headers, json=payload, timeout=30)
+    response = requests.post(URL, headers=headers, json=payload, timeout=60)
 
     if response.status_code == 401:
         raise ValueError("Invalid GROQ_API_KEY")
@@ -32,5 +41,7 @@ def ask_ai(prompt):
     choices = data.get("choices")
     if not choices:
         raise ValueError(f"Groq returned no choices: {data}")
+    print("[groq] Response received successfully")
 
     return choices[0]["message"]["content"]
+
