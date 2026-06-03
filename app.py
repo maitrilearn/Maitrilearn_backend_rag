@@ -8,10 +8,12 @@ from routes.rag import rag_bp
 
 app = Flask(__name__)
 
+# BUG FIX: Was missing comma between "www.maitrilearn.com" and "http://localhost"
+# causing them to concatenate into one invalid origin string
 CORS(app, origins=[
     "https://maitrilearn.github.io",
     "https://maitrilearn.com",
-    "https://www.maitrilearn.com"
+    "https://www.maitrilearn.com",
     "http://localhost",
     "http://127.0.0.1",
     "http://localhost:5500",

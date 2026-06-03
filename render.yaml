@@ -3,7 +3,6 @@ services:
     name: maitrilearn-backend
     env: python
     buildCommand: pip install -r requirements.txt
-    # Increased timeout to 300s for PDF processing
     startCommand: gunicorn app:app --bind 0.0.0.0:10000 --workers 1 --timeout 300
     envVars:
       - key: GROQ_API_KEY
@@ -12,7 +11,9 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
-      - key: HF_TOKEN
+      - key: JINA_API_KEY
+        sync: false
+      - key: LOCAL_EMBED_URL
         sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false

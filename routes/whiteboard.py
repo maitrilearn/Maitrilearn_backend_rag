@@ -132,7 +132,7 @@ Topic: {topic}
 """
 
     try:
-        raw    = ask_ai(prompt)
+        raw    = ask_ai(prompt, json_mode=True)
         clean  = re.sub(r"```json|```", "", raw).strip()
         parsed = json.loads(clean)
         lesson = parsed.get("lesson", parsed)
