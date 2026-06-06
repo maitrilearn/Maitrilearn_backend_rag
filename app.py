@@ -26,6 +26,7 @@ app.register_blueprint(tutor_bp)
 app.register_blueprint(feedback_bp)
 app.register_blueprint(whiteboard_bp)
 app.register_blueprint(rag_bp)
+app.register_blueprint(terminal_bp)
 
 @app.route("/")
 def home():
