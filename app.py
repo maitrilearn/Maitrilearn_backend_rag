@@ -5,6 +5,7 @@ from routes.tutor import tutor_bp
 from routes.feedback import feedback_bp
 from routes.whiteboard import whiteboard_bp
 from routes.rag import rag_bp
+from routes.terminal import terminal_bp
 
 app = Flask(__name__)
 
