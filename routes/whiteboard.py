@@ -14,95 +14,123 @@ def whiteboard_lesson():
 
     topic = data["topic"]
 
-    # ── RAG: fetch relevant chunks from knowledge base ────────────────────────
+    # RAG search
     rag_context = ""
-    chunks = []
-
+    chunks_found = 0
     try:
-        chunks = search_chunks(topic, top_k=5, threshold=0.25)
-
-        print(f"[whiteboard] Retrieved {len(chunks)} chunks")
-
+        chunks = search_chunks(topic, topic=topic, top_k=5, threshold=0.25)
         if chunks:
             rag_context = "\n\n".join(chunks)
-            print(f"[whiteboard] RAG found {len(chunks)} chunks for '{topic}'")
-        else:
-            print(f"[whiteboard] No RAG chunks found for '{topic}' — using AI knowledge")
-
+            chunks_found = len(chunks)
     except Exception as e:
-        print(f"[whiteboard] RAG search error: {e} — continuing without RAG")
+        print(f"[whiteboard] RAG error: {e}")
 
-    # ── Build prompt — inject RAG context if available ────────────────────────
-    if rag_context:
-        context_section = f"""
-USE THIS REFERENCE MATERIAL to build the lesson (prefer this over general knowledge):
+    context_section = f"""
+USE THIS REFERENCE MATERIAL (prefer it over general knowledge):
 ---
 {rag_context[:3000]}
 ---
-"""
-    else:
-        context_section = "(No reference material available — use your own knowledge)"
+""" if rag_context else "(No reference material — use your own knowledge)"
 
-    prompt = f"""You are an experienced classroom teacher. Create a step-by-step lesson for: "{topic}"
+    prompt = f"""You are an expert classroom teacher and visual explainer.
+Create a rich, visual, step-by-step lesson for: "{topic}"
 
 {context_section}
 
 TEACHING RULES:
-- Each step teaches ONE concept only
-- Explanations must be SHORT (1-2 sentences max)
-- Always give a real-world analogy or example
-- Narration must sound like a real teacher — conversational and warm
-- Use content from the reference material above when available
-- Never use jargon without explaining it first
+- Each step teaches ONE concept
+- Use SHORT explanations (1-2 sentences)
+- Always include real DevOps examples with actual commands/code
+- Make narration sound like a real teacher — warm, conversational
+- For DevOps topics: always include architecture diagram, code examples, and timeline
 
-Return ONLY valid JSON. No markdown, no backticks, no text outside JSON.
+Return ONLY valid JSON. No markdown, no backticks.
 
+Available step types (use a mix for rich visual experience):
+
+1. title — lesson opener
+2. concept — definition + analogy
+3. steps — numbered process steps
+4. example — real example with code
+5. codefile — full code file with syntax highlighting
+6. architecture — component diagram with connections
+7. flowdiagram — process flow with nodes
+8. timeline — pipeline/process timeline
+9. comparison — before vs after
+10. keypoints — summary
+
+Return this JSON structure:
 {{
   "title": "lesson title",
   "subject": "subject area",
-  "rag_used": {"true" if rag_context else "false"},
   "steps": [
     {{
       "type": "title",
       "text": "topic name",
-      "subtitle": "one sentence hook",
-      "narration": "warm greeting + why student should care (2 sentences)"
+      "subtitle": "why this matters in one sentence",
+      "narration": "warm intro (2 sentences)"
     }},
     {{
       "type": "concept",
-      "heading": "concept name",
-      "definition": "one clear sentence definition",
+      "heading": "What is {topic}?",
+      "definition": "one clear sentence",
       "analogy": "real-world analogy",
-      "narration": "teacher explains using the analogy (2 sentences)"
+      "narration": "teacher explains with analogy"
     }},
     {{
-      "type": "steps",
-      "heading": "how it works",
-      "items": [
-        {{"step": "Step name", "detail": "what happens"}},
-        {{"step": "Step name", "detail": "what happens"}},
-        {{"step": "Step name", "detail": "what happens"}},
-        {{"step": "Step name", "detail": "what happens"}}
+      "type": "architecture",
+      "heading": "How {topic} is structured",
+      "nodes": [
+        {{"id": "a", "label": "Component A", "description": "what it does", "role": "input"}},
+        {{"id": "b", "label": "Component B", "description": "what it does", "role": "process"}},
+        {{"id": "c", "label": "Component C", "description": "what it does", "role": "output"}}
       ],
-      "narration": "teacher walks through the steps"
+      "connections": [
+        {{"from": "a", "to": "b", "label": "sends to"}},
+        {{"from": "b", "to": "c", "label": "outputs"}}
+      ],
+      "narration": "teacher describes architecture components"
+    }},
+    {{
+      "type": "flowdiagram",
+      "heading": "Process Flow",
+      "nodes": [
+        {{"label": "Step 1", "sublabel": "detail", "type": "process"}},
+        {{"label": "Step 2", "sublabel": "detail", "type": "process"}},
+        {{"label": "Step 3", "sublabel": "detail", "type": "process"}},
+        {{"label": "Step 4", "sublabel": "detail", "type": "process"}}
+      ],
+      "narration": "teacher walks through the flow"
+    }},
+    {{
+      "type": "codefile",
+      "heading": "Real Code Example",
+      "filename": "Dockerfile or docker-compose.yml or relevant filename",
+      "lang": "dockerfile or yaml or bash",
+      "description": "what this file does",
+      "code": "actual real code here\\nwith newlines",
+      "explanation": "what each part does",
+      "narration": "teacher explains the code"
     }},
     {{
       "type": "example",
-      "heading": "Real Example",
-      "scenario": "concrete real-world scenario in 1 sentence",
-      "code": "actual command or code if applicable, empty string if not",
-      "explanation": "what the example shows in 1-2 sentences",
+      "heading": "Try It Yourself",
+      "scenario": "concrete scenario",
+      "code": "$ actual command here",
+      "lang": "bash",
+      "explanation": "what happens when you run this",
       "narration": "teacher explains the example"
     }},
     {{
-      "type": "diagram",
-      "heading": "diagram title",
-      "elements": [
-        {{"label": "Component A", "description": "what it does", "role": "input"}},
-        {{"label": "Component B", "description": "what it does", "role": "process"}},
-        {{"label": "Component C", "description": "what it does", "role": "output"}}
+      "type": "timeline",
+      "heading": "Pipeline / Process Timeline",
+      "nodes": [
+        {{"label": "Stage 1", "sublabel": "what happens", "duration": "~30s"}},
+        {{"label": "Stage 2", "sublabel": "what happens", "duration": "~2min"}},
+        {{"label": "Stage 3", "sublabel": "what happens", "duration": "~5min"}},
+        {{"label": "Stage 4", "sublabel": "what happens", "duration": "~1min"}}
       ],
-      "narration": "teacher describes the structure"
+      "narration": "teacher explains each stage"
     }},
     {{
       "type": "comparison",
@@ -111,24 +139,24 @@ Return ONLY valid JSON. No markdown, no backticks, no text outside JSON.
       "left_points": ["problem 1", "problem 2", "problem 3"],
       "right_label": "With {topic}",
       "right_points": ["solution 1", "solution 2", "solution 3"],
-      "narration": "teacher explains why this exists"
+      "narration": "teacher explains the contrast"
     }},
     {{
       "type": "keypoints",
       "heading": "Remember This",
       "points": [
-        {{"icon": "⚡", "text": "most important thing"}},
-        {{"icon": "🎯", "text": "second key insight"}},
-        {{"icon": "💡", "text": "practical tip or common mistake"}}
+        {{"icon": "⚡", "text": "most important insight"}},
+        {{"icon": "🎯", "text": "practical tip"}},
+        {{"icon": "💡", "text": "common mistake to avoid"}}
       ],
       "narration": "teacher summarizes warmly"
     }}
   ]
 }}
 
-Generate 6-8 steps. Always start with title. Always end with keypoints.
-Include at least: 1 concept, 1 steps, 1 example, 1 diagram or comparison.
-Topic: {topic}
+Generate 7-9 steps for: {topic}
+MUST include: title, at least one of (architecture OR flowdiagram), at least one timeline, at least one codefile, keypoints.
+Make code examples REAL and accurate for the topic.
 """
 
     try:
@@ -143,7 +171,7 @@ Topic: {topic}
         return {
             "lesson":   lesson,
             "rag_used": bool(rag_context),
-            "chunks":   len(chunks) if rag_context else 0
+            "chunks":   chunks_found
         }
 
     except json.JSONDecodeError as e:
@@ -151,4 +179,4 @@ Topic: {topic}
         return {"error": "AI returned invalid format. Try again."}, 500
     except Exception as e:
         print(f"[whiteboard] Error: {e}")
-        return {"error": "AI service unavailable. ry again."}, 503
+        return {"error": "AI service unavailable. Try again."}, 503
