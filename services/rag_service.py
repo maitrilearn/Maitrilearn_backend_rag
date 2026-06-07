@@ -48,7 +48,7 @@ def embed(text: str) -> list:
         "https://api.jina.ai/v1/embeddings",
         headers=headers,
         json={
-            "model": "jina-embeddings-v5-text-small",
+            "model": "jina-embeddings-v3",
             "input": [text]
         },
         timeout=30
