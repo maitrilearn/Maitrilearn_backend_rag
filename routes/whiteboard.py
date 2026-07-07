@@ -226,9 +226,9 @@ def whiteboard_lesson():
     chunks_found = 0
 
     try:
-        results = search_chunks(topic, topic=topic, top_k=8, threshold=0.2)
-        if not results:
-            results = search_chunks(topic, topic=None, top_k=5, threshold=0.25)
+        # SPEED FIX: single RAG call with broad search (no topic filter first)
+        # topic filter was causing double DB roundtrip — broad search is fast enough
+        results = search_chunks(topic, topic=None, top_k=8, threshold=0.35)
         if results:
             # Handle both dict results {content, source} and plain string results
             if results and isinstance(results[0], dict):
@@ -252,7 +252,7 @@ def whiteboard_lesson():
 
     raw = ""
     try:
-        raw   = ask_ai(prompt, json_mode=False)
+        raw   = ask_ai(prompt, json_mode=False, route='whiteboard')
         clean = clean_json(raw)
 
         try:
@@ -264,7 +264,7 @@ def whiteboard_lesson():
                 "Fix ONLY the JSON syntax and return the corrected JSON object. "
                 "Do not change any content, just fix syntax:\n\n" + clean[:4000]
             )
-            raw2  = ask_ai(fix_prompt, json_mode=False)
+            raw2  = ask_ai(fix_prompt, json_mode=False, route='whiteboard')
             clean = clean_json(raw2)
             parsed = json.loads(clean)
 

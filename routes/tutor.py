@@ -16,19 +16,23 @@ def tutor():
     except ValidationError as e:
         return {"error": e.message, "field": e.field}, 400
 
-    prompt = f"""Teach this topic simply to a student:
+    # SPEED FIX: shorter, focused prompt
+    prompt = f"""Explain {topic} to a student in this exact format:
 
-{topic}
+WHAT IT IS: (1 sentence)
+HOW IT WORKS: (2-3 sentences)
+REAL EXAMPLE: (1 concrete example)
+KEY POINTS: (3 bullet points)
 
-Include:
-- Clear explanation in simple language
-- Real-world example
-- Key points to remember"""
+Be concise."""
 
     try:
-        answer = ask_ai(prompt)
+        answer = ask_ai(prompt, route="tutor")
         logger.info(f"[tutor] topic={topic[:40]} len={len(answer)}")
         return {"answer": answer}
     except Exception as e:
         logger.error(f"[tutor] Error: {e}")
-        return {"error": "AI service unavailable. Please try again."}, 503
+        error_msg = str(e)
+        if "Rate limit" in error_msg or "429" in error_msg:
+            return {"error": "Too many requests — please wait 10 seconds and try again."}, 429
+        return {"error": "AI service unavailable. Please try again in a moment."}, 503

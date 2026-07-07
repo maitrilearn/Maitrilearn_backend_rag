@@ -48,6 +48,37 @@ def get_challenges():
     return {"challenges": CHALLENGES}
 
 
+# Simple commands that don't need AI — instant response, no rate limit
+STATIC_OUTPUTS = {
+    "pwd":                  "/home/student",
+    "ls":                   "Desktop  Documents  Downloads  notes.txt  projects",
+    "ls -la":               "total 32
+drwxr-xr-x 5 student student 4096 Jul  7 10:00 .
+drwxr-xr-x 3 root    root    4096 Jul  7 09:00 ..
+-rw-r--r-- 1 student student  220 Jul  7 09:00 .bash_logout
+-rw-r--r-- 1 student student 3526 Jul  7 09:00 .bashrc
+drwxr-xr-x 2 student student 4096 Jul  7 10:00 projects
+-rw-r--r-- 1 student student   48 Jul  7 10:00 notes.txt",
+    "echo hello":           "hello",
+    "echo hello world":     "hello world",
+    "whoami":               "student",
+    "uname":                "Linux",
+    "uname -a":             "Linux maitrilearn 5.15.0-1034-aws #38-Ubuntu SMP Mon May  1 19:45:39 UTC 2023 x86_64 x86_64 x86_64 GNU/Linux",
+    "hostname":             "maitrilearn-terminal",
+    "cat /etc/hostname":    "maitrilearn-terminal",
+    "date":                 "Tue Jul  7 10:00:00 UTC 2026",
+    "clear":                "",
+    "help":                 "Available: ls, cd, pwd, cat, mkdir, rm, chmod, ps, grep, docker, git, kubectl",
+    "git --version":        "git version 2.39.2",
+    "docker --version":     "Docker version 24.0.5, build ced0996",
+    "kubectl version --client": "Client Version: version.Info{Major:"1", Minor:"27", GitVersion:"v1.27.3"}",
+    "python3 --version":    "Python 3.11.4",
+    "python --version":     "Python 3.11.4",
+    "node --version":       "v18.17.0",
+    "pip --version":        "pip 23.2.1 from /usr/lib/python3/dist-packages/pip (python 3.11)",
+}
+
+
 @terminal_bp.route("/terminal/run", methods=["POST"])
 def run_command():
     data = request.get_json(silent=True) or {}
@@ -60,6 +91,19 @@ def run_command():
     context   = data.get("context", "general")[:20]
     challenge = data.get("challenge", "")[:300]
     history   = data.get("history", [])[-5:]
+
+    # ── Static shortcut — bypass AI for simple commands ──────────────────────
+    cmd_lower = command.strip().lower()
+    if cmd_lower in STATIC_OUTPUTS:
+        output   = STATIC_OUTPUTS[cmd_lower]
+        ch_done  = challenge and any(s in cmd_lower for s in challenge.lower().split()[:3])
+        logger.info(f"[terminal] static cmd={command[:30]}")
+        return {
+            "output":              output,
+            "challenge_completed": ch_done,
+            "hint":                "",
+            "success":             True
+        }
 
     history_str = "\n".join([f"$ {h['cmd']}\n{h['out']}" for h in history if isinstance(h, dict)])
 
