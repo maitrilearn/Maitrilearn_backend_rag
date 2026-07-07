@@ -132,7 +132,7 @@ def search_chunks(
     query:     str,
     topic:     str  = None,
     top_k:     int  = 8,       # TUNED: was 5
-    threshold: float = 0.2     # TUNED: was 0.25 — lower = more results
+    threshold: float = 0.35    # TUNED: raised from 0.2 — report says 0.20 chunks too loose
 ) -> list:
     """
     Search pgvector for relevant chunks.

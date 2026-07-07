@@ -230,10 +230,18 @@ def whiteboard_lesson():
         if not results:
             results = search_chunks(topic, topic=None, top_k=5, threshold=0.25)
         if results:
-            rag_chunks   = [r["content"] for r in results]
-            rag_sources  = [r.get("source", "notes") for r in results]
-            chunks_found = len(results)
-            logger.info(f"[whiteboard] RAG found {chunks_found} chunks for '{topic}'")
+            # Handle both dict results {content, source} and plain string results
+            if results and isinstance(results[0], dict):
+                rag_chunks  = [r.get("content", "") for r in results if r.get("content")]
+                rag_sources = [r.get("source", "notes") for r in results]
+            else:
+                rag_chunks  = [r for r in results if isinstance(r, str) and r.strip()]
+                rag_sources = ["notes"] * len(rag_chunks)
+            chunks_found = len(rag_chunks)
+            if chunks_found > 0:
+                logger.info(f"[whiteboard] RAG found {chunks_found} chunks for '{topic}'")
+            else:
+                logger.info(f"[whiteboard] RAG results empty after parsing for '{topic}'")
         else:
             logger.info(f"[whiteboard] No RAG chunks for '{topic}' — using AI knowledge")
     except Exception as e:

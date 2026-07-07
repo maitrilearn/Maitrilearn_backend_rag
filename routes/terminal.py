@@ -78,9 +78,28 @@ Return ONLY valid JSON:
 }}"""
 
     try:
-        raw    = ask_ai(prompt, json_mode=True)
-        clean  = re.sub(r"```json|```", "", raw).strip()
-        result = json.loads(clean)
+        # BUG FIX: json_mode=False avoids Groq 400 on complex commands like docker ps
+        raw   = ask_ai(prompt, json_mode=False)
+        clean = re.sub(r"```json|```", "", raw).strip()
+
+        # Find JSON object in response
+        start = clean.find("{")
+        end   = clean.rfind("}")
+        if start != -1 and end != -1:
+            clean = clean[start:end+1]
+
+        try:
+            result = json.loads(clean)
+        except json.JSONDecodeError:
+            # If JSON parse still fails, return raw output as terminal text
+            logger.warning(f"[terminal] JSON parse failed — returning raw for cmd={command[:30]}")
+            return {
+                "output":              raw[:800] if raw else "Command executed.",
+                "challenge_completed": False,
+                "hint":                "",
+                "success":             True
+            }
+
         logger.info(f"[terminal] ctx={context} cmd={command[:30]}")
         return {
             "output":              result.get("output", ""),
@@ -88,9 +107,6 @@ Return ONLY valid JSON:
             "hint":                result.get("hint", ""),
             "success":             result.get("success", True)
         }
-    except json.JSONDecodeError:
-        logger.warning(f"[terminal] JSON parse failed for cmd={command[:30]}")
-        return {"output": raw[:500] if raw else "Terminal error", "success": False, "challenge_completed": False, "hint": ""}, 200
     except Exception as e:
         logger.error(f"[terminal] Error: {e}")
         return {"error": "Terminal unavailable. Please try again."}, 503

@@ -101,8 +101,18 @@ def search():
     top_k = min(int(data.get("top_k", 5)), 10)
 
     try:
-        chunks = search_chunks(query, topic=topic or None, top_k=top_k)
-        return {"chunks": chunks, "count": len(chunks)}
+        raw_results = search_chunks(query, topic=topic or None, top_k=top_k)
+        # Normalize: handle both string list and dict list
+        if raw_results and isinstance(raw_results[0], dict):
+            contents = [r.get("content","") for r in raw_results if r.get("content")]
+        else:
+            contents = [r for r in raw_results if isinstance(r, str) and r.strip()]
+        return {
+            "chunks":   contents,
+            "count":    len(contents),
+            "no_match": len(contents) == 0,
+            "message":  "No matching notes found" if len(contents) == 0 else f"Found {len(contents)} relevant chunks"
+        }
     except Exception as e:
         logger.error(f"[rag/search] Error: {e}")
         return {"error": str(e)}, 500

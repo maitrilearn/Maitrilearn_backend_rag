@@ -12,7 +12,9 @@ def feedback():
     data = request.get_json(silent=True) or {}
 
     try:
-        text = validate_feedback(data.get("feedback", ""))
+        # BUG FIX: accept both "feedback" and "message" field names
+        raw_text = data.get("feedback") or data.get("message") or ""
+        text = validate_feedback(raw_text)
     except ValidationError as e:
         return {"error": e.message, "field": e.field}, 400
 
