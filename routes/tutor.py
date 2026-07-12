@@ -1,7 +1,7 @@
 import logging
 from flask import Blueprint, request
 from services.groq_service import ask_ai
-from utils.validator import validate_topic, ValidationError
+from utils.validator import validate_topic, looks_like_gibberish, ValidationError
 
 tutor_bp = Blueprint("tutor", __name__)
 logger = logging.getLogger("maitrilearn")
@@ -15,6 +15,14 @@ def tutor():
         topic = validate_topic(data.get("topic", ""))
     except ValidationError as e:
         return {"error": e.message, "field": e.field}, 400
+
+    if looks_like_gibberish(topic):
+        logger.info(f"[tutor] Rejected gibberish input: {topic[:40]!r}")
+        return {
+            "error": "That doesn't look like a real topic. Please enter a subject "
+                     "or question you'd like to learn about (e.g. 'Photosynthesis' or 'Docker').",
+            "field": "topic"
+        }, 400
 
     # SPEED FIX: shorter, focused prompt
     prompt = f"""Explain {topic} to a student in this exact format:

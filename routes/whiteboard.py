@@ -130,7 +130,9 @@ Available step types:
 - codefile: full code file (CS/DevOps only)
 - timeline: stages with durations
 - comparison: before vs after / type A vs type B
-- keypoints: final summary
+- summary: a short recap of everything covered in the lesson so far, in 3-5 plain sentences/bullets
+- remember: 2-4 concise must-remember facts distilled from the whole lesson (like exam-cram notes)
+- keypoints: final warm summary with icons and encouragement
 
 {{
   "title": "lesson title",
@@ -200,8 +202,28 @@ Available step types:
       "narration": "teacher explains the key differences"
     }},
     {{
-      "type": "keypoints",
+      "type": "summary",
+      "heading": "Let's Recap",
+      "points": [
+        "Plain-language recap sentence 1 covering an earlier concept step",
+        "Plain-language recap sentence 2 covering another earlier step",
+        "Plain-language recap sentence 3 tying it all together"
+      ],
+      "narration": "teacher briefly recaps everything covered so far"
+    }},
+    {{
+      "type": "remember",
       "heading": "Remember This",
+      "points": [
+        "Concise must-remember fact 1 — exam-worthy, specific",
+        "Concise must-remember fact 2 — specific number or term",
+        "Concise must-remember fact 3 — common mistake to avoid"
+      ],
+      "narration": "teacher stresses these are the facts to memorize"
+    }},
+    {{
+      "type": "keypoints",
+      "heading": "You've Got This!",
       "points": [
         {{"icon": "⚡", "text": "most important single fact about this topic"}},
         {{"icon": "🎯", "text": "key practical application or insight"}},
@@ -212,7 +234,10 @@ Available step types:
   ]
 }}
 
-Generate 7-9 steps. MUST start with title. MUST end with keypoints.
+Generate 8-10 steps. MUST start with title.
+MUST include a 'summary' step that recaps the lesson in plain language.
+MUST include a 'remember' step with 2-4 concise must-remember facts.
+MUST end with keypoints.
 MUST include architecture with 5+ REAL named components for engineering/science/devops topics.
 MUST include chalkboard step for important facts.
 Topic: {topic}

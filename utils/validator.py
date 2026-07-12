@@ -2,6 +2,7 @@
 Input validation utilities.
 All public-facing endpoints should validate inputs before processing.
 """
+import re
 
 
 class ValidationError(Exception):
@@ -73,3 +74,55 @@ def validate_filename(filename):
         )
 
     return filename
+
+
+# ── Gibberish / keyboard-mash detection ─────────────────────────────────────
+# Not a dictionary check — just a lightweight heuristic filter so the AI
+# doesn't fabricate a confident explanation for meaningless input like
+# "asdf qwer zxcv". Three independent signals; any one is enough to flag.
+
+_VOWELS = set("aeiouy")
+
+_KEYBOARD_MASH_PATTERNS = [
+    "asdf", "qwer", "zxcv", "qwerty", "asdfgh", "zxcvbn",
+    "qazwsx", "wasd", "hjkl", "poiuy", "mnbvc", "asdfjkl",
+]
+
+_REPEATED_CHAR_RE = re.compile(r"(.)\1{3,}")  # same char 4+ times in a row
+
+
+def looks_like_gibberish(text: str) -> bool:
+    """
+    Heuristic check for nonsense/keyboard-mash input.
+    Returns True if the input is likely meaningless rather than a real
+    topic or question. Deliberately conservative — only flags strong signals
+    to avoid rejecting real (if unusual) topics.
+    """
+    if not text:
+        return False
+
+    cleaned = text.lower().strip()
+    compact = re.sub(r"[^a-z]", "", cleaned)
+
+    if not compact:
+        return False  # pure numbers/symbols — let normal validation handle it
+
+    # Signal 1: known keyboard-mash substrings (asdf, qwer, zxcv, etc.)
+    for pattern in _KEYBOARD_MASH_PATTERNS:
+        if pattern in compact:
+            return True
+
+    # Signal 2: same character repeated 4+ times in a row (e.g. "aaaaaa")
+    if _REPEATED_CHAR_RE.search(compact):
+        return True
+
+    # Signal 3: majority of "words" have no vowels at all — real English
+    # words (and most real technical terms) virtually always contain one.
+    words = re.findall(r"[a-z]+", cleaned)
+    checked = [w for w in words if len(w) >= 3]
+    if checked:
+        no_vowel_words = sum(1 for w in checked if not any(c in _VOWELS for c in w))
+        if no_vowel_words / len(checked) >= 0.6:
+            return True
+
+    return False
