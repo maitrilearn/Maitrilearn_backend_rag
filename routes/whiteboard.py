@@ -113,6 +113,12 @@ TEACHING RULES:
 
 Return ONLY valid JSON — no markdown, no backticks, no text outside JSON.
 
+JSON SAFETY RULES (critical — output must be parseable):
+- Any code example must be SHORT: 12 lines maximum. Summarize longer algorithms with comments instead of full implementations.
+- Inside JSON string values, all newlines MUST be escaped as \n and all double quotes MUST be escaped as \".
+- Do not use raw/literal line breaks inside a string value — every line break inside a "code" or "narration" field must be the two characters backslash-n.
+- Keep every individual string field under 500 characters.
+
 Available step types:
 - title: lesson opener
 - concept: definition + analogy
@@ -213,6 +219,48 @@ Topic: {topic}
 """
 
 
+def build_fallback_lesson(topic: str) -> dict:
+    """
+    Minimal, always-valid lesson used when the AI fails to produce parseable
+    JSON after both attempts. Keeps the endpoint returning 200 with something
+    useful instead of a hard 500, so a single bad generation never blocks the
+    student.
+    """
+    return {
+        "title": topic,
+        "subject": "general",
+        "rag_mode": False,
+        "steps": [
+            {
+                "type": "title",
+                "text": topic,
+                "subtitle": "Let's explore this topic together",
+                "narration": f"Today we're learning about {topic}. Let's dive in!"
+            },
+            {
+                "type": "concept",
+                "heading": f"What is {topic}?",
+                "definition": (
+                    f"We had trouble generating the full visual lesson for '{topic}' just now. "
+                    "This can happen briefly during high load — please try again in a moment "
+                    "for the complete step-by-step lesson with diagrams and examples."
+                ),
+                "analogy": "",
+                "narration": "Please try regenerating this lesson for the full experience."
+            },
+            {
+                "type": "keypoints",
+                "heading": "Try Again",
+                "points": [
+                    {"icon": "🔄", "text": "Click 'Start Lesson' again to retry generating the full lesson"},
+                    {"icon": "📝", "text": "Try uploading notes on this topic for a more grounded lesson"}
+                ],
+                "narration": "Sorry about that — one more try should do it!"
+            }
+        ]
+    }
+
+
 @whiteboard_bp.route("/whiteboard/lesson", methods=["POST"])
 def whiteboard_lesson():
     data = request.get_json(silent=True) or {}
@@ -251,57 +299,74 @@ def whiteboard_lesson():
     prompt       = build_prompt(topic, subject_type, rag_chunks, rag_sources)
 
     raw = ""
+    lesson = None
     try:
-        raw   = ask_ai(prompt, json_mode=False, route='whiteboard')
+        # json_mode=True forces the Groq API's structured JSON output mode,
+        # which guarantees syntactically valid JSON (handles escaping of
+        # newlines/quotes inside code examples automatically). This was the
+        # main cause of 500s on code-heavy topics like "Sorting Algorithms",
+        # where free-text generation produced raw newlines inside JSON
+        # string values.
+        raw   = ask_ai(prompt, json_mode=True, route='whiteboard')
         clean = clean_json(raw)
 
         try:
             parsed = json.loads(clean)
         except json.JSONDecodeError:
-            logger.warning("[whiteboard] First JSON parse failed — retrying")
+            logger.warning(f"[whiteboard] First JSON parse failed for '{topic}' — retrying")
             fix_prompt = (
-                "The following is almost valid JSON but has syntax errors. "
-                "Fix ONLY the JSON syntax and return the corrected JSON object. "
-                "Do not change any content, just fix syntax:\n\n" + clean[:4000]
+                "The following is almost valid JSON but has syntax errors "
+                "(likely an unescaped newline or quote inside a string value). "
+                "Fix ONLY the JSON syntax and return the corrected, complete JSON object. "
+                "Do not change any content, just fix syntax:\n\n" + clean[:8000]
             )
-            raw2  = ask_ai(fix_prompt, json_mode=False, route='whiteboard')
-            clean = clean_json(raw2)
-            parsed = json.loads(clean)
+            try:
+                raw2   = ask_ai(fix_prompt, json_mode=True, route='whiteboard')
+                clean2 = clean_json(raw2)
+                parsed = json.loads(clean2)
+            except Exception as retry_err:
+                logger.error(f"[whiteboard] JSON repair also failed for '{topic}': {retry_err}")
+                parsed = None
 
-        lesson = parsed.get("lesson", parsed)
+        if parsed:
+            candidate = parsed.get("lesson", parsed)
+            if candidate.get("steps"):
+                lesson = candidate
 
-        if "steps" not in lesson or not lesson["steps"]:
-            raise ValueError("No steps in lesson")
+    except Exception as e:
+        logger.error(f"[whiteboard] Generation error for '{topic}': {e}")
 
-        unique_sources = list(set(rag_sources)) if rag_sources else []
-        citation = None
-        if unique_sources:
-            clean_sources = []
-            for s in unique_sources:
-                parts = s.split("_", 1)
-                name  = parts[1] if len(parts) > 1 and parts[0].isdigit() else s
-                clean_sources.append(name)
-            citation = {
-                "sources":     clean_sources,
-                "raw_sources": unique_sources,
-                "chunks_used": chunks_found,
-                "message":     f"This lesson was built from your uploaded notes: {', '.join(clean_sources)}"
-            }
+    # ── Graceful degradation: never hard-fail the student with a raw 500 ──────
+    degraded = False
+    if not lesson:
+        logger.warning(f"[whiteboard] Falling back to minimal lesson for '{topic}'")
+        lesson   = build_fallback_lesson(topic)
+        degraded = True
 
-        logger.info(f"[whiteboard] Lesson generated: topic={topic} subject_type={subject_type} "
-                   f"rag={bool(rag_chunks)} chunks={chunks_found} steps={len(lesson['steps'])}")
-
-        return {
-            "lesson":       lesson,
-            "rag_used":     bool(rag_chunks),
-            "chunks":       chunks_found,
-            "citation":     citation,
-            "subject_type": subject_type
+    unique_sources = list(set(rag_sources)) if rag_sources else []
+    citation = None
+    if unique_sources:
+        clean_sources = []
+        for s in unique_sources:
+            parts = s.split("_", 1)
+            name  = parts[1] if len(parts) > 1 and parts[0].isdigit() else s
+            clean_sources.append(name)
+        citation = {
+            "sources":     clean_sources,
+            "raw_sources": unique_sources,
+            "chunks_used": chunks_found,
+            "message":     f"This lesson was built from your uploaded notes: {', '.join(clean_sources)}"
         }
 
-    except json.JSONDecodeError as e:
-        logger.error(f"[whiteboard] JSON error: {e}\nRaw: {raw[:400]}")
-        return {"error": "Could not parse lesson. Please try again."}, 500
-    except Exception as e:
-        logger.error(f"[whiteboard] Error: {e}")
-        return {"error": "AI service unavailable. Please try again."}, 503
+    logger.info(f"[whiteboard] Lesson generated: topic={topic} subject_type={subject_type} "
+               f"rag={bool(rag_chunks)} chunks={chunks_found} steps={len(lesson['steps'])} "
+               f"degraded={degraded}")
+
+    return {
+        "lesson":       lesson,
+        "rag_used":     bool(rag_chunks),
+        "chunks":       chunks_found,
+        "citation":     citation,
+        "subject_type": subject_type,
+        "degraded":     degraded
+    }

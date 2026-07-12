@@ -13,7 +13,7 @@ logger       = logging.getLogger("maitrilearn")
 MAX_TOKENS = {
     "ask":        600,
     "tutor":      800,
-    "whiteboard": 2000,
+    "whiteboard": 3500,
     "terminal":   400,
     "default":    600,
 }
