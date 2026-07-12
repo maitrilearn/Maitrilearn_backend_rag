@@ -1,10 +1,31 @@
 import logging
 from flask import Blueprint, request
 from services.groq_service import ask_ai
+from services.rag_service import search_chunks
 from utils.validator import validate_question, validate_text, ValidationError
 
 ask_bp = Blueprint("ask", __name__)
 logger = logging.getLogger("maitrilearn")
+
+
+def _parse_chunks(results):
+    """Normalize search_chunks() output into (chunks, sources) lists."""
+    if results and isinstance(results[0], dict):
+        chunks  = [r.get("content", "") for r in results if r.get("content")]
+        sources = [r.get("source", "notes") for r in results if r.get("content")]
+    else:
+        chunks  = [r for r in results if isinstance(r, str) and r.strip()]
+        sources = ["notes"] * len(chunks)
+    return chunks, sources
+
+
+def _clean_sources(raw_sources: list) -> list:
+    """Strip numeric upload-id prefixes like '1234567890_docker-notes.pdf' -> 'docker-notes.pdf'."""
+    cleaned = []
+    for s in set(raw_sources):
+        parts = s.split("_", 1)
+        cleaned.append(parts[1] if len(parts) > 1 and parts[0].isdigit() else s)
+    return cleaned
 
 
 @ask_bp.route("/ask", methods=["POST"])
@@ -22,16 +43,53 @@ def ask():
     except ValidationError as e:
         return {"error": e.message, "field": e.field}, 400
 
-    # SPEED FIX: concise prompt — no verbose instructions
+    # ── RAG retrieval: search the student's uploaded notes first ──────────────
+    rag_chunks  = []
+    rag_sources = []
+    chunks_found = 0
+    try:
+        results = search_chunks(question, topic=topic or None, top_k=5, threshold=0.35)
+        if results:
+            rag_chunks, rag_sources = _parse_chunks(results)
+            chunks_found = len(rag_chunks)
+            logger.info(f"[ask] RAG found {chunks_found} chunks for question")
+        else:
+            logger.info("[ask] No RAG chunks found — falling back to AI knowledge")
+    except Exception as e:
+        # Non-fatal: fall back to plain LLM answer if retrieval fails
+        logger.warning(f"[ask] RAG error (non-fatal): {e}")
+
+    # ── Build prompt, grounded in notes when available ─────────────────────────
+    header = ""
     if subject and subject != "General" or topic:
-        prompt = f"Subject: {subject}\nTopic: {topic}\nQ: {question}\n\nAnswer clearly in 2-4 sentences."
+        header = f"Subject: {subject}\nTopic: {topic}\n"
+
+    if rag_chunks:
+        context = "\n\n---\n\n".join(rag_chunks)[:4000]
+        prompt = (
+            f"{header}"
+            f"STUDENT'S UPLOADED NOTES (use these as your PRIMARY source):\n"
+            f"---\n{context}\n---\n\n"
+            f"Q: {question}\n\n"
+            "Answer clearly in 2-4 sentences, grounded in the notes above. "
+            "If the notes don't fully cover the question, say so and add relevant general knowledge."
+        )
     else:
-        prompt = f"Q: {question}\n\nAnswer clearly in 2-4 sentences."
+        prompt = f"{header}Q: {question}\n\nAnswer clearly in 2-4 sentences."
 
     try:
         answer = ask_ai(prompt, route="ask")
-        logger.info(f"[ask] subject={subject} len={len(answer)}")
-        return {"answer": answer}
+        logger.info(f"[ask] subject={subject} rag={bool(rag_chunks)} "
+                    f"chunks={chunks_found} len={len(answer)}")
+
+        clean_sources = _clean_sources(rag_sources) if rag_sources else []
+        return {
+            "answer":     answer,
+            "rag_used":   bool(rag_chunks),
+            "chunks":     rag_chunks,
+            "sources":    clean_sources,
+            "no_match":   chunks_found == 0,
+        }
     except Exception as e:
         logger.error(f"[ask] Error: {e}")
         error_msg = str(e)
