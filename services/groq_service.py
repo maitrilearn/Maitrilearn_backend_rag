@@ -48,7 +48,7 @@ def ask_ai(prompt: str, json_mode: bool = False, route: str = "default") -> str:
 
     for attempt in range(max_retries + 1):
         t0       = time.time()
-        response = requests.post(URL, headers=headers, json=payload, timeout=60)
+        response = requests.post(URL, headers=headers, json=payload, timeout=(10, 120))
         elapsed  = round((time.time() - t0) * 1000)
 
         if response.status_code == 429:
