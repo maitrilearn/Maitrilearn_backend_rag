@@ -51,7 +51,13 @@ def before_request():
 @app.after_request
 def after_request(response):
     """Log every request with timing."""
-    duration_ms = round((time.time() - g.start_time) * 1000)
+    # g.start_time may not be set if an earlier before_request hook (e.g.
+    # Flask-Limiter aborting with 429) short-circuited before ours ran.
+    # Falling back to 0ms rather than crashing — this was silently turning
+    # every rate-limited request into a raw 500 instead of the intended
+    # clean 429 (confirmed in production logs).
+    start_time  = getattr(g, "start_time", None)
+    duration_ms = round((time.time() - start_time) * 1000) if start_time else 0
     ip          = request.headers.get("X-Forwarded-For", request.remote_addr)
     origin      = request.headers.get("Origin", "-")
 

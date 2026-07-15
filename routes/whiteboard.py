@@ -1,12 +1,56 @@
 import logging
 import json
 import re
+import time as _time
+from threading import Lock
 from flask import Blueprint, request
 from services.groq_service import ask_ai
 from services.rag_service import search_chunks
+from utils.limiter import limiter
 
 whiteboard_bp = Blueprint("whiteboard", __name__)
 logger = logging.getLogger("maitrilearn")
+
+# ── LESSON CACHE ─────────────────────────────────────────────────────────────
+# Whiteboard is by far the heaviest Groq consumer (1000+ tokens/call) and the
+# most rate-limit-exposed endpoint — production logs showed an 82% fallback
+# rate under repeated requests for the same handful of common topics (Docker,
+# Python, SQL...). Caching successful (non-degraded) lessons by topic means a
+# second student asking about "Docker" gets an instant, full-quality response
+# instead of competing for the same Groq quota and likely degrading.
+# NOTE: this is per-worker-process memory, not shared across gunicorn workers
+# or restarts — a real production fix would move this to Redis/Supabase, but
+# even per-process it meaningfully cuts duplicate Groq calls for popular topics.
+_lesson_cache = {}
+_lesson_cache_lock = Lock()
+_CACHE_TTL_SECONDS = 30 * 60   # 30 minutes
+_CACHE_MAX_ENTRIES = 200
+
+
+def _cache_key(topic: str) -> str:
+    return re.sub(r"\s+", " ", topic.strip().lower())
+
+
+def _cache_get(topic: str):
+    key = _cache_key(topic)
+    with _lesson_cache_lock:
+        entry = _lesson_cache.get(key)
+        if not entry:
+            return None
+        cached_at, payload = entry
+        if _time.time() - cached_at > _CACHE_TTL_SECONDS:
+            del _lesson_cache[key]
+            return None
+        return payload
+
+
+def _cache_set(topic: str, payload: dict):
+    key = _cache_key(topic)
+    with _lesson_cache_lock:
+        if len(_lesson_cache) >= _CACHE_MAX_ENTRIES and key not in _lesson_cache:
+            oldest_key = min(_lesson_cache, key=lambda k: _lesson_cache[k][0])
+            del _lesson_cache[oldest_key]
+        _lesson_cache[key] = (_time.time(), payload)
 
 
 def clean_json(raw: str) -> str:
@@ -287,12 +331,18 @@ def build_fallback_lesson(topic: str) -> dict:
 
 
 @whiteboard_bp.route("/whiteboard/lesson", methods=["POST"])
+@limiter.limit("8 per minute")
 def whiteboard_lesson():
     data = request.get_json(silent=True) or {}
     if not data.get("topic"):
         return {"error": "topic is required"}, 400
 
     topic = data["topic"].strip()
+
+    cached = _cache_get(topic)
+    if cached:
+        logger.info(f"[whiteboard] Cache hit for '{topic}'")
+        return {**cached, "cached": True}
 
     rag_chunks  = []
     rag_sources = []
@@ -387,7 +437,7 @@ def whiteboard_lesson():
                f"rag={bool(rag_chunks)} chunks={chunks_found} steps={len(lesson['steps'])} "
                f"degraded={degraded}")
 
-    return {
+    result = {
         "lesson":       lesson,
         "rag_used":     bool(rag_chunks),
         "chunks":       chunks_found,
@@ -395,3 +445,11 @@ def whiteboard_lesson():
         "subject_type": subject_type,
         "degraded":     degraded
     }
+
+    # Only cache full-quality lessons — never cache a degraded fallback,
+    # or every subsequent request for that topic would get stuck serving
+    # the minimal 3-step version until the TTL expires.
+    if not degraded:
+        _cache_set(topic, result)
+
+    return result
