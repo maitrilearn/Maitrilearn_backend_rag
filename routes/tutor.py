@@ -2,12 +2,14 @@ import logging
 from flask import Blueprint, request
 from services.groq_service import ask_ai
 from utils.validator import validate_topic, looks_like_gibberish, ValidationError
+from utils.limiter import limiter
 
 tutor_bp = Blueprint("tutor", __name__)
 logger = logging.getLogger("maitrilearn")
 
 
 @tutor_bp.route("/tutor", methods=["POST"])
+@limiter.limit("10 per minute")
 def tutor():
     data = request.get_json(silent=True) or {}
 

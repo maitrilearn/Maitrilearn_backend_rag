@@ -117,12 +117,23 @@ def looks_like_gibberish(text: str) -> bool:
         return True
 
     # Signal 3: majority of "words" have no vowels at all — real English
-    # words (and most real technical terms) virtually always contain one.
+    # words virtually always contain one. BUT short tech acronyms (SQL, CSS,
+    # TCP, HTTP, HTTPS, AWS, DNS, SSH...) are also commonly vowel-free, so a
+    # single short word must never be enough to flag on this signal alone —
+    # only a run of several such words, or one unusually long vowel-free
+    # word, is a real gibberish signal.
     words = re.findall(r"[a-z]+", cleaned)
     checked = [w for w in words if len(w) >= 3]
-    if checked:
+
+    if len(checked) >= 2:
         no_vowel_words = sum(1 for w in checked if not any(c in _VOWELS for c in w))
         if no_vowel_words / len(checked) >= 0.6:
+            return True
+    elif len(checked) == 1 and len(checked[0]) >= 6:
+        # A single word: only flag if it's long enough that a real
+        # vowel-free acronym at that length is implausible (SQL/CSS/HTTPS
+        # are all ≤5 chars).
+        if not any(c in _VOWELS for c in checked[0]):
             return True
 
     return False

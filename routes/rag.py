@@ -2,9 +2,11 @@ import os
 import io
 import logging
 import requests
+from urllib.parse import quote
 from flask import Blueprint, request
 from services.rag_service import ingest_text, search_chunks
 from utils.validator import validate_filename, validate_topic, validate_text, ValidationError
+from utils.auth import require_admin_key
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,6 +19,7 @@ logger = logging.getLogger("maitrilearn")
 
 
 @rag_bp.route("/rag/ingest", methods=["POST"])
+@require_admin_key
 def ingest():
     data = request.get_json(silent=True) or {}
 
@@ -135,6 +138,7 @@ def list_topics():
 
 
 @rag_bp.route("/rag/delete", methods=["DELETE"])
+@require_admin_key
 def delete_topic():
     data = request.get_json(silent=True) or {}
     try:
@@ -143,7 +147,7 @@ def delete_topic():
         return {"error": e.message}, 400
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     res = requests.delete(
-        f"{SUPABASE_URL}/rest/v1/documents?topic=eq.{topic}",
+        f"{SUPABASE_URL}/rest/v1/documents?topic=eq.{quote(topic)}",
         headers=headers, timeout=10
     )
     if res.status_code in (200, 204):

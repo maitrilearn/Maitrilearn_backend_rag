@@ -10,8 +10,16 @@ from routes.feedback import feedback_bp
 from routes.whiteboard import whiteboard_bp
 from routes.rag import rag_bp
 from routes.terminal import terminal_bp
+from utils.limiter import limiter
 
 app = Flask(__name__)
+
+# ── RATE LIMITING ───────────────────────────────────────────────────────────
+# Was defined in utils/limiter.py but never wired in — every endpoint was
+# unlimited. 200/day + 50/hour + 20/minute per IP as a sane default; the
+# LLM-backed endpoints (/tutor, /ask, /whiteboard/lesson) additionally get a
+# tighter per-route limit since those are the expensive/abusable ones.
+limiter.init_app(app)
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 CORS(app, origins=[
@@ -115,6 +123,15 @@ def method_not_allowed(e):
         "method": request.method,
         "path":   request.path
     }), 405
+
+
+@app.errorhandler(429)
+def rate_limited(e):
+    logger.warning(f"429 — {request.method} {request.path} rate limit exceeded")
+    return jsonify({
+        "error":   "Too many requests. Please slow down and try again shortly.",
+        "message": str(getattr(e, "description", "Rate limit exceeded"))
+    }), 429
 
 
 @app.errorhandler(500)
