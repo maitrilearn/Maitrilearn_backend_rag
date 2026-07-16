@@ -7,6 +7,7 @@ from flask import Blueprint, request
 from services.rag_service import ingest_text, search_chunks
 from utils.validator import validate_filename, validate_topic, validate_text, ValidationError
 from utils.auth import require_admin_key
+from utils.limiter import limiter
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,11 +19,12 @@ rag_bp = Blueprint("rag", __name__)
 logger = logging.getLogger("maitrilearn")
 
 
-@rag_bp.route("/rag/ingest", methods=["POST"])
-@require_admin_key
-def ingest():
-    data = request.get_json(silent=True) or {}
-
+def _do_ingest(data: dict, tag: str):
+    """
+    Shared ingest logic for both the admin route and the public student-notes
+    route. `tag` is just for logging so the two call sites are distinguishable
+    in production logs.
+    """
     try:
         filename = validate_filename(data.get("filename", ""))
         topic    = validate_topic(data.get("topic", ""))
@@ -56,7 +58,7 @@ def ingest():
 
     try:
         result = ingest_text(text, topic, source=filename)
-        logger.info(f"[rag/ingest] topic={topic} file={filename} chunks={result['chunks_stored']}")
+        logger.info(f"[rag/ingest:{tag}] topic={topic} file={filename} chunks={result['chunks_stored']}")
         return {
             "success":       True,
             "filename":      filename,
@@ -65,10 +67,37 @@ def ingest():
             "chunks_stored": result["chunks_stored"],
             "total_chunks":  result["total_chunks"],
             "message":       f"Ingested {result['chunks_stored']} chunks from {filename}"
-        }
+        }, 200
     except Exception as e:
-        logger.error(f"[rag/ingest] Error: {e}")
+        logger.error(f"[rag/ingest:{tag}] Error: {e}")
         return {"error": f"Ingestion failed: {str(e)}"}, 500
+
+
+@rag_bp.route("/rag/ingest", methods=["POST"])
+@require_admin_key
+def ingest():
+    """Admin-only bulk ingest — used by admin.html to add curated course content."""
+    data = request.get_json(silent=True) or {}
+    body, status = _do_ingest(data, tag="admin")
+    return body, status
+
+
+# ── Public student note-upload ingest ───────────────────────────────────────
+# notesService.js (student "upload my notes" flow) needs to call ingest
+# without a secret — that secret would have to live in public frontend JS,
+# which would leak it and let anyone hit the admin-only /rag/ingest and
+# /rag/delete too. So this is a SEPARATE route: no admin key, but tightly
+# rate-limited (well below anything a real student needs, but enough to stop
+# scripted abuse/knowledge-base spam) and it can only ever ADD chunks — it
+# has no delete capability, so the worst outcome of abuse is knowledge-base
+# clutter, not data loss. Content still goes through the same filename/topic
+# validation and 50-page cap as the admin path.
+@rag_bp.route("/rag/notes/ingest", methods=["POST"])
+@limiter.limit("6 per hour;2 per minute", override_defaults=True)
+def notes_ingest():
+    data = request.get_json(silent=True) or {}
+    body, status = _do_ingest(data, tag="student")
+    return body, status
 
 
 def extract_pdf_safe(content: bytes, max_pages: int = 30):

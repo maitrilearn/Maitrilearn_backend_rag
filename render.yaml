@@ -8,6 +8,21 @@ services:
     envVars:
       - key: GROQ_API_KEY
         sync: false
+      # ── LLM fallback providers (services/llm_service.py) ─────────────────
+      # Optional but strongly recommended: without these, a Groq rate-limit
+      # takes the whole platform down. Get free keys at:
+      #   Cerebras: https://cloud.cerebras.ai
+      #   Gemini:   https://aistudio.google.com/apikey
+      - key: CEREBRAS_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      # ── Admin auth (utils/auth.py) ────────────────────────────────────────
+      # REQUIRED. Without this, /rag/ingest and /rag/delete fail closed
+      # (503) rather than being left open — set this to any long random
+      # string and pass it as the X-Admin-Key header from the admin UI.
+      - key: ADMIN_API_KEY
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_KEY

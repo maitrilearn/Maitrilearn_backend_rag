@@ -3,6 +3,7 @@ from flask import Blueprint, request
 from services.groq_service import ask_ai
 from services.rag_service import search_chunks
 from utils.validator import validate_question, validate_text, ValidationError
+from utils.limiter import limiter
 
 ask_bp = Blueprint("ask", __name__)
 logger = logging.getLogger("maitrilearn")
@@ -28,7 +29,14 @@ def _clean_sources(raw_sources: list) -> list:
     return cleaned
 
 
+# QA audit P0: /ask was inheriting the blueprint-wide default limit
+# (200/day, 50/hour, 20/minute — utils/limiter.py) with no route-specific
+# override. A stress test showed 10 concurrent requests all hit 429 within
+# 500ms, and a classroom of ~30 students would exhaust the 50/hour bucket
+# in minutes. override_defaults=True replaces (not stacks on top of) the
+# blueprint default for this route specifically.
 @ask_bp.route("/ask", methods=["POST"])
+@limiter.limit("30 per minute;400 per hour", override_defaults=True)
 def ask():
     data = request.get_json(silent=True) or {}
 
