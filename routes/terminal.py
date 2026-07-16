@@ -4,6 +4,7 @@ import re
 from flask import Blueprint, request
 from services.groq_service import ask_ai
 from utils.validator import validate_command, ValidationError
+from utils.limiter import limiter
 
 terminal_bp = Blueprint("terminal", __name__)
 logger = logging.getLogger("maitrilearn")
@@ -109,7 +110,15 @@ def _blocked_response(command: str):
     return None
 
 
+# QA audit CRITICAL finding: /terminal/run had no route-specific limit, so it
+# inherited the blueprint-wide default (200/day, 50/hour, 20/minute — see
+# utils/limiter.py). A 28-day course with terminal practice on every day
+# burns through 50/hour almost immediately — and that cap applied even to
+# free static commands (pwd, ls, whoami) that never touch the AI or cost
+# anything. override_defaults=True replaces it with a limit sized for real
+# classroom practice instead.
 @terminal_bp.route("/terminal/run", methods=["POST"])
+@limiter.limit("60 per minute;600 per hour", override_defaults=True)
 def run_command():
     data = request.get_json(silent=True) or {}
 
