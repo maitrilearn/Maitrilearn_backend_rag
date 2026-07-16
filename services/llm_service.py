@@ -70,8 +70,14 @@ def _providers():
             # target for both. If this 404s again in the logs, override
             # with CEREBRAS_MODEL without a redeploy — check
             # https://inference-docs.cerebras.ai/models/overview first.
-            "model":   os.getenv("CEREBRAS_MODEL", "gpt-oss-120b"),
-            "retries": 0,
+            "model":     os.getenv("CEREBRAS_MODEL", "gpt-oss-120b"),
+            "retries":   0,
+            # gpt-oss-120b is a reasoning model: it spends part of max_tokens
+            # on hidden "thinking" before the visible answer, so a small
+            # max_tokens can produce a 200 OK with NO content at all (verified
+            # against the live API — see conversation notes). Disable
+            # reasoning so the full token budget goes to the answer.
+            "reasoning": True,
         },
         {
             "name":    "gemini",
@@ -83,8 +89,12 @@ def _providers():
             # is the current official successor. Same deal: override with
             # GEMINI_MODEL if this one rots too, check
             # https://ai.google.dev/gemini-api/docs/deprecations first.
-            "model":   os.getenv("GEMINI_MODEL", "gemini-3-flash-preview"),
-            "retries": 0,
+            "model":     os.getenv("GEMINI_MODEL", "gemini-3-flash-preview"),
+            "retries":   0,
+            # Same reasoning-token issue as Cerebras — gemini-3-flash-preview
+            # returned finish_reason="length" with 0 completion tokens on a
+            # 10-token budget in live testing.
+            "reasoning": True,
         },
     ]
 
@@ -110,6 +120,16 @@ def _call_provider(provider: dict, prompt: str, max_tokens: int,
     }
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
+    if provider.get("reasoning"):
+        # Ask the model to skip hidden "thinking" tokens and go straight to
+        # the answer — otherwise max_tokens can be entirely consumed by
+        # reasoning with nothing left for visible content (confirmed live:
+        # both gpt-oss-120b and gemini-3-flash-preview did exactly this on a
+        # 10-token budget). Not every provider honors this param, so it's
+        # combined with the token padding below as a belt-and-suspenders fix.
+        payload["reasoning_effort"] = "none"
+        max_tokens = int(max_tokens * 1.5) + 200
+        payload["max_tokens"] = max_tokens
 
     # connect timeout small & fixed; read timeout is whatever budget remains
     response = requests.post(
@@ -140,9 +160,15 @@ def _call_provider(provider: dict, prompt: str, max_tokens: int,
     if not choices:
         raise LLMError(f"{provider['name']} returned no choices: {str(data)[:200]}", retryable=False)
 
-    content = choices[0]["message"]["content"]
+    content = choices[0].get("message", {}).get("content")
     if not content or not content.strip():
-        raise LLMError(f"{provider['name']} returned empty content", retryable=False)
+        finish_reason = choices[0].get("finish_reason", "?")
+        raise LLMError(
+            f"{provider['name']} returned empty/missing content "
+            f"(finish_reason={finish_reason}) — likely ran out of tokens on "
+            f"hidden reasoning before producing an answer",
+            retryable=False,
+        )
     return content
 
 
