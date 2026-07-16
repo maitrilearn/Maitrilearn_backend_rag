@@ -75,6 +75,40 @@ def get_challenges():
     return {"challenges": CHALLENGES}
 
 
+# ── Hard-blocked patterns ────────────────────────────────────────────────────
+# This terminal is entirely simulated — the AI free-generates plausible
+# output text, it never touches a real filesystem or network. The QA audit
+# flagged this as "information disclosure" / "egress" because the model was
+# willing to hallucinate a realistic-looking /etc/passwd dump or fetch
+# arbitrary URLs on request. Nothing was actually leaked or fetched, but
+# teaching students that these commands "work" here is still the wrong
+# behavior for a learning sandbox, so we intercept them before they ever
+# reach the model.
+_BLOCKED_PATTERNS = [
+    (re.compile(r"\bcat\s+/etc/(passwd|shadow|sudoers)\b"),
+     "cat: {cmd}: Permission denied (this sandbox does not expose system account files)"),
+    (re.compile(r"\b(curl|wget|nc|ncat|ssh|scp|telnet)\b"),
+     "{prog}: network access is disabled in this learning sandbox"),
+    (re.compile(r"\bsudo\b"),
+     "sudo: this command is not permitted in the student sandbox"),
+    (re.compile(r"\b(python3?|node|perl|ruby)\s+-c\b"),
+     "Inline script execution (-c) is disabled in this sandbox. Try running a saved script instead."),
+    (re.compile(r"\brm\s+-rf?\s+/(\s|$)"),
+     "rm: it is not possible to remove the root directory in this sandbox"),
+    (re.compile(r";|\|\||&&|\$\(|`"),
+     "This sandbox only supports one command at a time — command chaining/injection syntax is disabled"),
+]
+
+
+def _blocked_response(command: str):
+    for pattern, template in _BLOCKED_PATTERNS:
+        if pattern.search(command):
+            prog_match = re.match(r"\s*(\S+)", command)
+            prog = prog_match.group(1) if prog_match else command
+            return template.format(cmd=command, prog=prog)
+    return None
+
+
 @terminal_bp.route("/terminal/run", methods=["POST"])
 def run_command():
     data = request.get_json(silent=True) or {}
@@ -91,6 +125,16 @@ def run_command():
     # ── Static shortcut — instant, no AI, no rate limit ──────────────────────
     cmd_clean = command.strip()
     cmd_lower = cmd_clean.lower()
+
+    blocked_msg = _blocked_response(cmd_clean)
+    if blocked_msg:
+        logger.info(f"[terminal] blocked cmd={cmd_clean[:60]!r}")
+        return {
+            "output":              blocked_msg,
+            "challenge_completed": False,
+            "hint":                "",
+            "success":             False
+        }
 
     if cmd_lower in STATIC_OUTPUTS:
         output  = STATIC_OUTPUTS[cmd_lower]

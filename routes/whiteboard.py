@@ -62,6 +62,76 @@ def clean_json(raw: str) -> str:
     return raw
 
 
+def repair_truncated_lesson(raw: str):
+    """
+    Best-effort salvage for a response that got cut off mid-generation
+    (hit the token limit before the closing braces). Rather than throwing
+    the whole lesson away, walk back to the last fully-closed step object
+    in the "steps" array and close the JSON there — the student gets a
+    shorter but still real, non-degraded lesson instead of the 3-step
+    apology placeholder.
+    """
+    raw = re.sub(r"```json|```", "", raw).strip()
+    start = raw.find("{")
+    if start == -1:
+        return None
+    body = raw[start:]
+
+    steps_key = body.find('"steps"')
+    if steps_key == -1:
+        return None
+    arr_start = body.find("[", steps_key)
+    if arr_start == -1:
+        return None
+
+    depth = 0
+    last_complete_end = None
+    in_string = False
+    escape = False
+    for i in range(arr_start + 1, len(body)):
+        ch = body[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                last_complete_end = i
+        elif ch == "]" and depth == 0:
+            break
+
+    if last_complete_end is None:
+        return None
+
+    salvaged = body[:last_complete_end + 1] + "]}"
+    try:
+        parsed = json.loads(salvaged)
+    except json.JSONDecodeError:
+        return None
+
+    steps = parsed.get("steps", [])
+    if len(steps) < 2:
+        return None
+    if steps[-1].get("type") != "keypoints":
+        steps.append({
+            "type": "keypoints",
+            "heading": "Recap",
+            "points": [{"icon": "✅", "text": "That's the core of it — nice work!"}],
+            "narration": "That covers the key parts of this lesson."
+        })
+        parsed["steps"] = steps
+    return parsed
+
+
 def detect_subject_type(topic: str) -> str:
     t = topic.lower()
     if any(k in t for k in ["docker","kubernetes","k8s","linux","git","ci/cd",
@@ -278,7 +348,7 @@ Available step types:
   ]
 }}
 
-Generate 8-10 steps. MUST start with title.
+Generate 7-9 steps (fewer, well-formed steps beat more steps that get cut off). MUST start with title.
 MUST include a 'summary' step that recaps the lesson in plain language.
 MUST include a 'remember' step with 2-4 concise must-remember facts.
 MUST end with keypoints.
@@ -436,7 +506,14 @@ def whiteboard_lesson():
                 parsed = json.loads(clean2)
             except Exception as retry_err:
                 logger.error(f"[whiteboard] JSON repair also failed for '{topic}': {retry_err}")
-                parsed = None
+                # Last resort before the plain-text rescue: the failure is
+                # very often a mid-generation truncation, not a syntax typo —
+                # salvage whatever complete steps we already got rather than
+                # discarding the whole (mostly-good) response.
+                parsed = repair_truncated_lesson(raw)
+                if parsed:
+                    logger.info(f"[whiteboard] Salvaged {len(parsed.get('steps', []))} "
+                                f"steps from truncated response for '{topic}'")
 
         if parsed:
             candidate = parsed.get("lesson", parsed)

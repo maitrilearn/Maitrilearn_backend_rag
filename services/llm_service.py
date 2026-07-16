@@ -37,7 +37,13 @@ logger = logging.getLogger("maitrilearn")
 MAX_TOKENS = {
     "ask":        600,
     "tutor":      800,
-    "whiteboard": 3500,
+    # BUG FIX (critical, QA audit): 3500 tokens was not enough for an 8-10
+    # step lesson with architecture/chalkboard/comparison/summary/remember/
+    # keypoints sections — the model's response was getting cut off mid-JSON,
+    # which failed to parse and fell back to the 3-step "we had trouble
+    # generating this lesson" placeholder for the vast majority of topics
+    # (91% in the QA pass). Raised well above the observed truncation point.
+    "whiteboard": 7500,
     "terminal":   400,
     "default":    600,
 }

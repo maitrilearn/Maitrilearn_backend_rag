@@ -49,6 +49,28 @@ def before_request():
 
 
 @app.after_request
+def add_security_headers(response):
+    """
+    Security headers flagged as missing across the board in the QA audit
+    (Content-Security-Policy, X-Frame-Options, X-Content-Type-Options,
+    Strict-Transport-Security, Referrer-Policy). This is a JSON API with no
+    HTML rendering of its own, so the CSP is deliberately locked down.
+    """
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'none'; frame-ancestors 'none'"
+    )
+    response.headers.setdefault(
+        "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
+    )
+    response.headers.setdefault("X-XSS-Protection", "0")  # deprecated; CSP supersedes it
+    return response
+
+
+@app.after_request
 def after_request(response):
     """Log every request with timing."""
     # g.start_time may not be set if an earlier before_request hook (e.g.
