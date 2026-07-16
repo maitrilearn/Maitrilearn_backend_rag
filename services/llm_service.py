@@ -70,14 +70,16 @@ def _providers():
             # target for both. If this 404s again in the logs, override
             # with CEREBRAS_MODEL without a redeploy — check
             # https://inference-docs.cerebras.ai/models/overview first.
-            "model":     os.getenv("CEREBRAS_MODEL", "gpt-oss-120b"),
-            "retries":   0,
+            "model":            os.getenv("CEREBRAS_MODEL", "gpt-oss-120b"),
+            "retries":          0,
             # gpt-oss-120b is a reasoning model: it spends part of max_tokens
             # on hidden "thinking" before the visible answer, so a small
             # max_tokens can produce a 200 OK with NO content at all (verified
-            # against the live API — see conversation notes). Disable
-            # reasoning so the full token budget goes to the answer.
-            "reasoning": True,
+            # against the live API). UNLIKE Gemini, Cerebras rejects
+            # reasoning_effort="none" outright (400: "Supported values are
+            # 'low', 'medium', and 'high'" — confirmed in production logs).
+            # "low" is the lightest valid value.
+            "reasoning_effort": os.getenv("CEREBRAS_REASONING_EFFORT", "low"),
         },
         {
             "name":    "gemini",
@@ -89,12 +91,11 @@ def _providers():
             # is the current official successor. Same deal: override with
             # GEMINI_MODEL if this one rots too, check
             # https://ai.google.dev/gemini-api/docs/deprecations first.
-            "model":     os.getenv("GEMINI_MODEL", "gemini-3-flash-preview"),
-            "retries":   0,
-            # Same reasoning-token issue as Cerebras — gemini-3-flash-preview
-            # returned finish_reason="length" with 0 completion tokens on a
-            # 10-token budget in live testing.
-            "reasoning": True,
+            "model":            os.getenv("GEMINI_MODEL", "gemini-3-flash-preview"),
+            "retries":          0,
+            # Gemini DOES accept "none" (unlike Cerebras) — confirmed live,
+            # 1 completion token used, instant response.
+            "reasoning_effort": os.getenv("GEMINI_REASONING_EFFORT", "none"),
         },
     ]
 
@@ -120,14 +121,16 @@ def _call_provider(provider: dict, prompt: str, max_tokens: int,
     }
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
-    if provider.get("reasoning"):
-        # Ask the model to skip hidden "thinking" tokens and go straight to
-        # the answer — otherwise max_tokens can be entirely consumed by
+    if provider.get("reasoning_effort"):
+        # Ask the model to minimize hidden "thinking" tokens and get to the
+        # answer — otherwise max_tokens can be entirely consumed by
         # reasoning with nothing left for visible content (confirmed live:
         # both gpt-oss-120b and gemini-3-flash-preview did exactly this on a
-        # 10-token budget). Not every provider honors this param, so it's
-        # combined with the token padding below as a belt-and-suspenders fix.
-        payload["reasoning_effort"] = "none"
+        # small budget). The valid values differ per provider (Cerebras
+        # rejects "none" outright — confirmed via a live 400 in production
+        # logs — Gemini accepts it fine), so this is provider-configured,
+        # not a single hardcoded value.
+        payload["reasoning_effort"] = provider["reasoning_effort"]
         max_tokens = int(max_tokens * 1.5) + 200
         payload["max_tokens"] = max_tokens
 

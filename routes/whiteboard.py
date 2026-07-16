@@ -288,13 +288,48 @@ Topic: {topic}
 """
 
 
-def build_fallback_lesson(topic: str) -> dict:
+def build_fallback_lesson(topic: str, ai_explanation: str = None) -> dict:
     """
-    Minimal, always-valid lesson used when the AI fails to produce parseable
-    JSON after both attempts. Keeps the endpoint returning 200 with something
-    useful instead of a hard 500, so a single bad generation never blocks the
-    student.
+    Used when the AI fails to produce parseable JSON after both attempts.
+    If ai_explanation is provided (from the plain-text rescue attempt in
+    whiteboard_lesson), the student still gets real teaching content in a
+    minimal 3-step shape — not a "please try again" apology. Only falls back
+    to the apology message if EVERY generation attempt failed, including
+    the plain-text one.
     """
+    if ai_explanation:
+        return {
+            "title": topic,
+            "subject": "general",
+            "rag_mode": False,
+            "steps": [
+                {
+                    "type": "title",
+                    "text": topic,
+                    "subtitle": "Let's explore this topic together",
+                    "narration": f"Today we're learning about {topic}. Let's dive in!"
+                },
+                {
+                    "type": "concept",
+                    "heading": f"Understanding {topic}",
+                    "definition": ai_explanation,
+                    "analogy": "",
+                    "narration": "Here's the key idea — the full illustrated lesson "
+                                 "with diagrams is temporarily unavailable, but here's "
+                                 "what you need to know."
+                },
+                {
+                    "type": "keypoints",
+                    "heading": "Want the Full Lesson?",
+                    "points": [
+                        {"icon": "🔄", "text": "Try again in a moment for the full illustrated lesson"},
+                        {"icon": "📝", "text": "Uploading notes on this topic also helps"}
+                    ],
+                    "narration": "That's the essential idea — try again shortly for the full visual walkthrough!"
+                }
+            ]
+        }
+
     return {
         "title": topic,
         "subject": "general",
@@ -414,8 +449,28 @@ def whiteboard_lesson():
     # ── Graceful degradation: never hard-fail the student with a raw 500 ──────
     degraded = False
     if not lesson:
-        logger.warning(f"[whiteboard] Falling back to minimal lesson for '{topic}'")
-        lesson   = build_fallback_lesson(topic)
+        # Before falling all the way back to a canned apology, try ONE plain
+        # text generation. Structured JSON output is the hardest thing to
+        # get right from a strained/fallback provider (schema compliance +
+        # correct escaping); plain prose has neither constraint, so it's
+        # meaningfully more likely to succeed even when JSON mode just
+        # failed twice. This means a "degraded" response usually still
+        # teaches the student something real instead of just apologizing.
+        ai_explanation = None
+        try:
+            simple_prompt = (
+                f"Explain '{topic}' to a student in 3-4 clear, informative "
+                f"sentences. Plain text only, no markdown, no JSON, no headers."
+            )
+            text = ask_ai(simple_prompt, json_mode=False, route='whiteboard')
+            if text and text.strip():
+                ai_explanation = text.strip()[:800]
+        except Exception as rescue_err:
+            logger.warning(f"[whiteboard] Plain-text rescue also failed for '{topic}': {rescue_err}")
+
+        logger.warning(f"[whiteboard] Falling back to minimal lesson for '{topic}' "
+                        f"(rescue_content={'yes' if ai_explanation else 'no'})")
+        lesson   = build_fallback_lesson(topic, ai_explanation)
         degraded = True
 
     unique_sources = list(set(rag_sources)) if rag_sources else []
