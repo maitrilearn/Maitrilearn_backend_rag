@@ -64,14 +64,26 @@ def _providers():
             "name":    "cerebras",
             "api_key": os.getenv("CEREBRAS_API_KEY", "").strip(),
             "url":     "https://api.cerebras.ai/v1/chat/completions",
-            "model":   os.getenv("CEREBRAS_MODEL", "llama-3.3-70b"),
+            # llama-3.3-70b was deprecated by Cerebras (Feb 2026) and
+            # llama3.1-8b was deprecated May 27 2026 — both now 404.
+            # gpt-oss-120b is Cerebras's current recommended migration
+            # target for both. If this 404s again in the logs, override
+            # with CEREBRAS_MODEL without a redeploy — check
+            # https://inference-docs.cerebras.ai/models/overview first.
+            "model":   os.getenv("CEREBRAS_MODEL", "gpt-oss-120b"),
             "retries": 0,
         },
         {
             "name":    "gemini",
             "api_key": os.getenv("GEMINI_API_KEY", "").strip(),
             "url":     "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-            "model":   os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            # gemini-2.5-flash was retired for new/existing callers ahead
+            # of its published Oct 2026 date (Google pulled it early —
+            # see the Gemini API deprecations page). gemini-3-flash-preview
+            # is the current official successor. Same deal: override with
+            # GEMINI_MODEL if this one rots too, check
+            # https://ai.google.dev/gemini-api/docs/deprecations first.
+            "model":   os.getenv("GEMINI_MODEL", "gemini-3-flash-preview"),
             "retries": 0,
         },
     ]
@@ -109,6 +121,17 @@ def _call_provider(provider: dict, prompt: str, max_tokens: int,
         raise LLMError(f"{provider['name']} rate limited (429)", retryable=True)
     if response.status_code == 401:
         raise LLMError(f"{provider['name']} rejected the API key (401) — check env var", retryable=False)
+    if response.status_code == 404:
+        # Almost always means the model ID is stale/deprecated, not that the
+        # provider is down. Providers rotate model names every few months
+        # (this exact thing happened to both Cerebras and Gemini here) — flag
+        # it distinctly so it doesn't get read as "just another 429-ish blip"
+        # in the logs.
+        raise LLMError(
+            f"{provider['name']} model '{provider['model']}' not found (404) — "
+            f"likely deprecated, override with {provider['name'].upper()}_MODEL env var",
+            retryable=False,
+        )
     if response.status_code != 200:
         raise LLMError(f"{provider['name']} error {response.status_code}: {response.text[:200]}", retryable=False)
 
