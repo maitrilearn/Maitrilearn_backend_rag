@@ -39,7 +39,7 @@ def _looks_like_question(text: str) -> bool:
 
 
 @tutor_bp.route("/tutor", methods=["POST"])
-@limiter.limit("30 per minute", override_defaults=True)  # was 10/min — QA flagged as too strict for classroom use
+@limiter.limit("120 per minute;1500 per hour", override_defaults=True)  # aligned with /ask — QA audit C-02 flagged 30/min as still too strict for classroom concurrency
 def tutor():
     data = request.get_json(silent=True) or {}
 

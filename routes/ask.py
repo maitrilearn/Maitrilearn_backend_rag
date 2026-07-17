@@ -35,8 +35,16 @@ def _clean_sources(raw_sources: list) -> list:
 # 500ms, and a classroom of ~30 students would exhaust the 50/hour bucket
 # in minutes. override_defaults=True replaces (not stacks on top of) the
 # blueprint default for this route specifically.
+# QA audit CRITICAL (C-02): even the previous 30/min override still
+# saturated with ~5 concurrent students — every request past the 30th in a
+# given minute got a hard 429, and a real classroom is 20-30+ students each
+# potentially firing a request in the same window. Raised substantially per
+# the audit's recommendation. Actual throughput is still ultimately bounded
+# by the upstream provider's own rate limits (Groq/Cerebras/Gemini in
+# services/llm_service.py), but this stops OUR limiter from being the
+# bottleneck before that ever becomes the constraint.
 @ask_bp.route("/ask", methods=["POST"])
-@limiter.limit("30 per minute;400 per hour", override_defaults=True)
+@limiter.limit("120 per minute;1500 per hour", override_defaults=True)
 def ask():
     data = request.get_json(silent=True) or {}
 
