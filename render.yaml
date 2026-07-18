@@ -3,7 +3,20 @@ services:
     name: maitrilearn-backend
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:10000 --workers 2 --threads 4 --worker-class gthread --timeout 60 --access-logfile - --error-logfile -
+    # QA audit HIGH finding (H-03): P99 whiteboard latency = 46.5s under 10
+    # concurrent requests. --threads 4 meant only 2 workers x 4 threads = 8
+    # concurrent request slots — the 9th and 10th concurrent request queued
+    # behind an in-flight ~20-40s LLM call before even starting. Each request
+    # spends nearly all its time blocked on network I/O to the LLM provider
+    # (not CPU), so gthread can safely handle far more threads per worker
+    # than CPU core count would suggest — raised to 16. Paired with the
+    # per-topic single-flight lock in routes/whiteboard.py (which collapses
+    # duplicate concurrent requests for the same topic into one LLM call),
+    # this addresses both causes of the stress-test P99 spike. Workers stay
+    # at 2 — more worker PROCESSES (vs threads) cost real RAM on Render's
+    # free tier and risk OOM, whereas more threads within existing workers
+    # are cheap for I/O-bound work like this.
+    startCommand: gunicorn app:app --bind 0.0.0.0:10000 --workers 2 --threads 16 --worker-class gthread --timeout 60 --access-logfile - --error-logfile -
     healthCheckPath: /health
     envVars:
       - key: GROQ_API_KEY

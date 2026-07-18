@@ -10,6 +10,7 @@ from routes.feedback import feedback_bp
 from routes.whiteboard import whiteboard_bp
 from routes.rag import rag_bp
 from routes.terminal import terminal_bp
+from routes.admin import admin_bp
 from utils.limiter import limiter
 
 app = Flask(__name__)
@@ -101,6 +102,7 @@ app.register_blueprint(feedback_bp)
 app.register_blueprint(whiteboard_bp)
 app.register_blueprint(rag_bp)
 app.register_blueprint(terminal_bp)
+app.register_blueprint(admin_bp)
 
 
 # ── HEALTH CHECK ──────────────────────────────────────────────────────────────

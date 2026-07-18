@@ -57,12 +57,23 @@ def tutor():
         }, 400
 
     # ── Ground the answer in the student's uploaded notes when available ────
+    # QA audit HIGH finding (H-05): "No citations in Tutor/Doubt UI" — the
+    # RAG retrieval here only ever kept chunk *content* for the prompt and
+    # discarded the source filenames, so there was never a "sources" field
+    # for the frontend to show in the first place (unlike routes/ask.py,
+    # which already tracked this). Now mirrors ask.py's _clean_sources
+    # pattern so the UI has something to render.
     rag_context = ""
+    rag_sources = []
     try:
         chunks = search_chunks(topic, topic=None, top_k=4, threshold=0.35)
         if chunks:
             contents = [c.get("content", "") if isinstance(c, dict) else c for c in chunks]
             rag_context = "\n\n---\n\n".join(c for c in contents if c)[:3000]
+            raw_sources = [c.get("source", "notes") for c in chunks if isinstance(c, dict) and c.get("content")]
+            for s in set(raw_sources):
+                parts = s.split("_", 1)
+                rag_sources.append(parts[1] if len(parts) > 1 and parts[0].isdigit() else s)
     except Exception as e:
         logger.warning(f"[tutor] RAG lookup error (non-fatal): {e}")
 
@@ -128,7 +139,7 @@ Be concise."""
     try:
         answer = ask_ai(prompt, route="tutor")
         logger.info(f"[tutor] topic={topic[:40]} question={is_question} rag={bool(rag_context)} len={len(answer)}")
-        return {"answer": answer, "rag_used": bool(rag_context)}
+        return {"answer": answer, "rag_used": bool(rag_context), "sources": rag_sources}
     except Exception as e:
         logger.error(f"[tutor] Error: {e}")
         error_msg = str(e)

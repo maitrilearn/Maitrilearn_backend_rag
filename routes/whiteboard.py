@@ -26,6 +26,26 @@ _lesson_cache_lock = Lock()
 _CACHE_TTL_SECONDS = 30 * 60   # 30 minutes
 _CACHE_MAX_ENTRIES = 200
 
+# ── Per-topic generation lock (thundering-herd fix, see whiteboard_lesson) ──
+_topic_locks = {}
+_topic_locks_meta_lock = Lock()
+
+
+def _get_topic_lock(topic: str) -> Lock:
+    """One lock per distinct topic (by cache key), created on first use.
+    Concurrent requests for the SAME topic serialize on this so only one of
+    them actually calls the LLM; different topics get different locks and
+    stay fully parallel. The registry itself is tiny (one Lock object per
+    distinct topic ever seen) and never explicitly cleared — acceptable
+    given the process-lifetime scope already noted for _lesson_cache above."""
+    key = _cache_key(topic)
+    with _topic_locks_meta_lock:
+        lock = _topic_locks.get(key)
+        if lock is None:
+            lock = Lock()
+            _topic_locks[key] = lock
+        return lock
+
 
 def _cache_key(topic: str) -> str:
     return re.sub(r"\s+", " ", topic.strip().lower())
@@ -455,12 +475,6 @@ def build_fallback_lesson(topic: str, ai_explanation: str = None) -> dict:
     }
 
 
-# QA audit HIGH finding: "Whiteboard Rate Limit Too Low" — 8/minute was
-# tripping 429s during normal classroom use (a lesson can involve several
-# regenerations/topic changes in quick succession, and the lesson cache
-# above already absorbs repeat requests for the same topic within 30 min).
-# Raised in line with the /ask and /tutor limits; override_defaults=True so
-# it replaces rather than stacks on top of the blueprint-wide default.
 @whiteboard_bp.route("/whiteboard/lesson", methods=["POST"])
 @limiter.limit("30 per minute;400 per hour", override_defaults=True)
 def whiteboard_lesson():
@@ -475,6 +489,33 @@ def whiteboard_lesson():
         logger.info(f"[whiteboard] Cache hit for '{topic}'")
         return {**cached, "cached": True}
 
+    # QA audit HIGH finding (H-03): "P99 whiteboard latency = 46.5s under 10
+    # concurrent" — the 10-concurrent stress test almost certainly hit the
+    # SAME handful of topics at once. Every one of those requests missed the
+    # cache simultaneously (none of them had finished yet to populate it) and
+    # each independently fired its own ~7500-token whiteboard LLM call — a
+    # classic thundering herd, and exactly the pattern a real classroom
+    # produces too (many students opening the same lesson topic at once).
+    # Fix: serialize generation per-topic with a lock. The first request for
+    # a topic generates and caches it; concurrent duplicates for that same
+    # topic wait on the lock and then get an instant cache hit instead of
+    # each independently re-generating. Different topics still run fully in
+    # parallel (separate locks), so this only collapses duplicate work.
+    lock = _get_topic_lock(topic)
+    with lock:
+        # Double-checked locking: a concurrent request for this exact topic
+        # may have finished and populated the cache while we were waiting.
+        cached = _cache_get(topic)
+        if cached:
+            logger.info(f"[whiteboard] Cache hit after waiting on in-flight generation: '{topic}'")
+            return {**cached, "cached": True}
+        return _generate_lesson(topic, data)
+
+
+def _generate_lesson(topic, data):
+    """The actual (slow) lesson generation + RAG + caching logic — split out
+    from whiteboard_lesson() so it can be called from inside a per-topic lock
+    (see _get_topic_lock) without duplicating this ~140-line body."""
     rag_chunks  = []
     rag_sources = []
     chunks_found = 0
@@ -611,3 +652,5 @@ def whiteboard_lesson():
         _cache_set(topic, result)
 
     return result
+
+
