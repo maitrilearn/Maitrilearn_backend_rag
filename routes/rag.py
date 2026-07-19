@@ -120,7 +120,15 @@ def extract_pdf_safe(content: bytes, max_pages: int = 30):
     return "\n\n".join(pages), limit
 
 
+# QA audit HIGH finding: /rag/search was public with no auth — anyone could
+# dump the entire knowledge base by querying broadly. Checked actual callers
+# across the frontend: admin.html's "Test Search" panel is the ONLY caller
+# (devops.html only calls /rag/topics, which just lists topic names, not
+# chunk content, and needs to stay public for the course page to render).
+# There is no legitimate public/student use of /rag/search, so it now
+# requires the same admin auth as /rag/ingest and /rag/delete.
 @rag_bp.route("/rag/search", methods=["POST"])
+@require_admin_key
 def search():
     data = request.get_json(silent=True) or {}
 
