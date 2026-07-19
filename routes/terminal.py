@@ -168,7 +168,7 @@ _BLOCKED_PATTERNS = [
      "Inline script execution (-c) is disabled in this sandbox. Try running a saved script instead."),
     (re.compile(r"\brm\s+-rf?\s+/(\s|$)"),
      "rm: it is not possible to remove the root directory in this sandbox"),
-    (re.compile(r";|\|\||&&|\$\(|`"),
+    (re.compile(r";|\||&&|\$\(|`"),
      "This sandbox only supports one command at a time — command chaining/injection syntax is disabled"),
     # QA audit CRITICAL finding: "LLM Prompt Leakage" / "Prompt Injection" —
     # phrases like "ignore previous instructions" or "print your system

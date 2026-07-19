@@ -32,7 +32,7 @@ CORS(app, origins=[
     "http://localhost:5500",
     "http://localhost:9000",
     "null"
-])
+], supports_credentials=True)
 
 # ── LOGGING ───────────────────────────────────────────────────────────────────
 logging.basicConfig(

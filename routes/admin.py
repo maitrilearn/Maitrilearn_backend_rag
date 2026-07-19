@@ -17,15 +17,57 @@ them absent than fake.
 import os
 import logging
 import requests
-from flask import Blueprint
+from flask import Blueprint, request, jsonify
 from routes.feedback import get_recent_feedback
-from utils.auth import require_admin_key
+from utils.auth import require_admin_key, set_session_cookie, clear_session_cookie
+from utils.limiter import limiter
 
 admin_bp = Blueprint("admin", __name__)
 logger = logging.getLogger("maitrilearn")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+
+# ── Session login/logout (post-audit fix, finding H-04) ─────────────────────
+# admin.html POSTs the raw key here ONCE per login instead of keeping it in
+# localStorage forever. On success it gets back an HttpOnly session cookie
+# and never has to touch (or store) the raw key again for the rest of the
+# session. Rate-limited tightly since this is effectively a login endpoint
+# and is the one place the raw key is still typed/sent.
+@admin_bp.route("/admin/login", methods=["POST"])
+@limiter.limit("10 per minute")
+def admin_login():
+    configured_key = os.getenv("ADMIN_API_KEY", "").strip()
+    if not configured_key:
+        return {"error": "Admin endpoint is not configured. Contact the site administrator."}, 503
+
+    data          = request.get_json(silent=True) or {}
+    provided_key  = (data.get("key") or "").strip()
+
+    if provided_key != configured_key:
+        logger.warning(
+            f"[auth] Rejected admin login attempt "
+            f"ip={request.headers.get('X-Forwarded-For', request.remote_addr)}"
+        )
+        return {"error": "Invalid admin key"}, 401
+
+    resp = jsonify({"success": True})
+    return set_session_cookie(resp)
+
+
+@admin_bp.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    resp = jsonify({"success": True})
+    return clear_session_cookie(resp)
+
+
+@admin_bp.route("/admin/session", methods=["GET"])
+@require_admin_key
+def admin_session_check():
+    """Lets admin.html silently check 'am I still logged in?' on page load
+    without prompting for the key every time (cookie lasts 12h)."""
+    return {"authenticated": True}
 
 
 @admin_bp.route("/admin/topics", methods=["GET"])
